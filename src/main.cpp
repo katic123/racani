@@ -17,33 +17,44 @@
 // clang-format on
 using namespace std;
 
-class Mesh {
+class Mesh
+{
 public:
   vector<glm::vec3> vertices;
+  vector<glm::vec3> originalVertices;
   vector<glm::ivec3> faces;
 
-  int loadMesh(const std::string &filepath) {
+  int loadMesh(const std::string &filepath)
+  {
     cout << "Loading file: " << filepath << endl;
     ifstream file(filepath);
-    if (!file.is_open()) {
+    if (!file.is_open())
+    {
       cout << "Failed to open file: " << filepath << endl;
       return 1;
     }
 
     string line;
-    while (getline(file, line)) {
+    while (getline(file, line))
+    {
       istringstream ss(line);
       string prefix;
       ss >> prefix;
 
-      if (prefix == "v") {
+      if (prefix == "v")
+      {
         float x, y, z;
-        if (ss >> x >> y >> z) {
+        if (ss >> x >> y >> z)
+        {
           this->vertices.push_back(glm::vec3(x, y, z));
+          this->originalVertices.push_back(glm::vec3(x, y, z));
         }
-      } else if (prefix == "f") {
+      }
+      else if (prefix == "f")
+      {
         string v1, v2, v3;
-        if (ss >> v1 >> v2 >> v3) {
+        if (ss >> v1 >> v2 >> v3)
+        {
           int idx1 = stoi(v1.substr(0, v1.find('/')));
           int idx2 = stoi(v2.substr(0, v2.find('/')));
           int idx3 = stoi(v3.substr(0, v3.find('/')));
@@ -55,52 +66,181 @@ public:
          << " faces" << endl;
     return 0;
   }
-  virtual void moveMesh(glm::vec3 m) {
-    for (int i = 0; i < vertices.size(); i++) {
+  virtual void rotateMesh(float angle, glm::vec3 axis)
+  {
+    glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), glm::radians(angle), axis);
+    for (int i = 0; i < vertices.size(); i++)
+    {
+      glm::vec4 rotatedVertex = rotationMatrix * glm::vec4(vertices[i], 1.0f);
+      vertices[i] = glm::vec3(rotatedVertex);
+      originalVertices[i] = glm::vec3(rotatedVertex);
+    }
+  }
+  virtual void moveMeshFor(glm::vec3 m)
+  {
+    for (int i = 0; i < vertices.size(); i++)
+    {
       vertices[i] += m;
     }
   }
-  virtual void scaleMesh(float s) {
-    for (int i = 0; i < vertices.size(); i++) {
+  virtual void moveMeshTo(glm::vec3 m)
+  {
+    for (int i = 0; i < vertices.size(); i++)
+    {
+      vertices[i] = originalVertices[i] + m;
+    }
+  }
+  virtual void scaleMesh(float s)
+  {
+    for (int i = 0; i < vertices.size(); i++)
+    {
       vertices[i].x *= s;
       vertices[i].y *= s;
       vertices[i].z *= s;
     }
+    originalVertices = vertices;
+  }
+  virtual void orientMesh(float angleRad, glm::vec3 axis, glm::vec3 pos)
+  {
+    glm::mat4 R = glm::rotate(glm::mat4(1.0f), angleRad, axis);
+    for (int i = 0; i < vertices.size(); i++)
+    {
+      vertices[i] = glm::vec3(R * glm::vec4(originalVertices[i], 1.0f)) + pos;
+    }
   }
 };
-class Sphere : public Mesh {
+
+class Line : public Mesh
+
+{
+
 public:
-  float radius = 1;
-  float mass = 1;
-  glm::vec3 center = glm::vec3(0.0f, 0.0f, 0.0f);
-  glm::vec3 vel;
-  Sphere() {
-    vel = glm::vec3(0.0f, 0.0f, 0.0f);
-    this->loadMesh("../src/objects/sphere.obj");
-  }
-  Sphere(glm::vec3 velocity, glm::vec3 cen, float r, float mass) {
-    this->mass = mass;
-    vel = velocity;
-    this->loadMesh("../src/objects/sphere.obj");
-    this->scaleMesh(r);
-    this->moveMesh(cen);
-  }
-  void scaleMesh(float s) override {
-    for (int i = 0; i < vertices.size(); i++) {
-      vertices[i].x *= s;
-      vertices[i].y *= s;
-      vertices[i].z *= s;
-    }
-    radius *= s;
-  }
-  virtual void moveMesh(glm::vec3 m) override {
-    for (int i = 0; i < vertices.size(); i++) {
-      vertices[i] += m;
-    }
-    center += m;
+  Line(glm::vec3 a, glm::vec3 b)
+  {
+    vertices.push_back(a);
+    vertices.push_back(b);
+    faces.push_back(glm::ivec3(0, 0, 1));
   }
 };
-class Camera {
+
+class CoordiateSystem : public Mesh
+{
+public:
+  CoordiateSystem()
+  {
+    vertices.push_back(glm::vec3(0.0f, 0.0f, 0.0f));
+    vertices.push_back(glm::vec3(0.0f, 0.0f, 10.0f));
+    vertices.push_back(glm::vec3(0.0f, 10.0f, 0.0f));
+    vertices.push_back(glm::vec3(10.0f, 0.0f, 0.0f));
+    faces.push_back(glm::ivec3(0, 0, 1));
+    faces.push_back(glm::ivec3(0, 0, 2));
+    faces.push_back(glm::ivec3(0, 0, 3));
+  }
+};
+
+class SplineCurve : public Mesh
+{
+public:
+  vector<glm::vec3> controlPoints;
+  vector<glm::vec3> linePoints;
+  vector<glm::vec3> goalOrientations;
+  vector<glm::vec3> rotationAxes;
+  vector<float> rotationAngles;
+  SplineCurve()
+  {
+    controlPoints = vector<glm::vec3>();
+  }
+
+  int loadControlPoints(const std::string &filepath)
+  {
+    cout << "Loading file: " << filepath << endl;
+    ifstream file(filepath);
+    if (!file.is_open())
+    {
+      cout << "Failed to open file: " << filepath << endl;
+      return 1;
+    }
+
+    string line;
+    while (getline(file, line))
+    {
+      istringstream ss(line);
+      float x, y, z;
+      ss >> x >> y >> z;
+
+      controlPoints.push_back(glm::vec3(x, z, y));
+    }
+    cout << "Loaded " << controlPoints.size() << " control points" << endl;
+    return 0;
+  }
+  int createSplineCurve()
+  {
+    for (int i = 1; i < controlPoints.size() - 2; i++)
+    {
+      for (float t = 0; t <= 1; t += 0.01)
+      {
+        glm::vec4 t_mat = glm::vec4(t * t * t, t * t, t, 1);
+        glm::mat4 matrix = glm::mat4(
+            -1.0f, 3.0f, -3.0f, 1.0f,
+            3.0f, -6.0f, 3.0f, 0.0f,
+            -3.0f, 0.0f, 3.0f, 0.0f,
+            1.0f, 4.0f, 1.0f, 0.0f);
+
+        glm::mat4x3 r = glm::mat4x3(controlPoints[i - 1].x, controlPoints[i - 1].y, controlPoints[i - 1].z,
+                                    controlPoints[i].x, controlPoints[i].y, controlPoints[i].z,
+                                    controlPoints[i + 1].x, controlPoints[i + 1].y, controlPoints[i + 1].z,
+                                    controlPoints[i + 2].x, controlPoints[i + 2].y, controlPoints[i + 2].z);
+        glm::vec3 p = t_mat * (1.0f / 6.0f) * glm::transpose(matrix) * glm::transpose(r);
+        linePoints.push_back(p);
+
+        glm::vec3 t_tangent = glm::vec3(t * t, t, 1.0f);
+        glm::mat3x4 mat_d = glm::mat3x4(-1.0f, 3.0f, -3.0f, 1.0f,
+                                        2.0f, -4.0f, 2.0f, 0.0f,
+                                        -1.0f, 0.0f, 1.0f, 0.0f);
+        glm::vec3 tangent = t_tangent * (1.0f / 2.0f) * glm::transpose(mat_d) * glm::transpose(r);
+        goalOrientations.push_back(tangent);
+      }
+    }
+
+    return 0;
+  }
+  int loadSplineCurve(const std::string &filepath)
+  {
+    int res = loadControlPoints(filepath);
+    int create = createSplineCurve();
+    if (res != 0)
+      return res;
+    if (controlPoints.size() < 4)
+    {
+      cout << "Need at least 4 control points, got " << controlPoints.size() << endl;
+      return 1;
+    }
+    /* for (int i = 0; i < controlPoints.size() - 1; i++)
+     {
+       vertices.push_back(controlPoints[i]);
+       vertices.push_back(controlPoints[i + 1]);
+       vertices.push_back(controlPoints[i + 1]);
+
+       faces.push_back(glm::ivec3(3 * i, 3 * i + 1, 3 * i + 2));
+     }*/
+    for (int i = 0; i < linePoints.size() - 1; i++)
+    {
+      cout << "Line point " << i << ": " << linePoints[i].x << ", " << linePoints[i].y << ", " << linePoints[i].z << endl;
+    }
+    for (int i = 0; i < linePoints.size() - 1; i++)
+    {
+      vertices.push_back(linePoints[i]);
+      vertices.push_back(linePoints[i + 1]);
+      vertices.push_back(linePoints[i + 1]);
+
+      faces.push_back(glm::ivec3(3 * i, 3 * i + 1, 3 * i + 2));
+    }
+
+    return 0;
+  }
+};
+class Camera
+{
 public:
   glm::vec3 eye;
   glm::vec3 looking_at;
@@ -110,7 +250,8 @@ public:
 
   float yaw = -90.0f;
   float pitch = 0.0f;
-  Camera(glm::vec3 eye, glm::vec3 looking_at, glm::vec3 up) {
+  Camera(glm::vec3 eye, glm::vec3 looking_at, glm::vec3 up)
+  {
     this->eye = eye;
     this->looking_at = looking_at;
     this->up = glm::normalize(up);
@@ -121,7 +262,8 @@ public:
   }
 
   void moveCameraInDirection(float frontspeed, float rightspeed, float upspeed,
-                             float deltaTime) {
+                             float deltaTime)
+  {
     eye += 100.0f * deltaTime * frontspeed *
            normalize(glm::vec3(front.x, 0, front.z));
     eye += 100.0f * deltaTime * rightspeed *
@@ -130,7 +272,8 @@ public:
     looking_at = eye + front;
   }
 
-  void rotate(float yawDelta, float pitchDelta) {
+  void rotate(float yawDelta, float pitchDelta)
+  {
     yaw += yawDelta;
     pitch += pitchDelta;
 
@@ -150,19 +293,21 @@ public:
   }
 };
 
-class Scene {
+class Scene
+{
 public:
   vector<Mesh> staticMeshes;
-  vector<Sphere> movingMeshes;
 
   vector<float> sceneVertices;
   vector<unsigned int> sceneFaces;
   Camera *camera;
   Scene(Camera *camera) { this->camera = camera; }
-  void addToScene(Mesh &mesh) {
+  void addToScene(Mesh &mesh)
+  {
     unsigned int offset = sceneVertices.size() / 6; // 6 = 3 pozicije + 3 boje
 
-    for (int j = 0; j < mesh.vertices.size(); j++) {
+    for (int j = 0; j < mesh.vertices.size(); j++)
+    {
 
       sceneVertices.push_back(mesh.vertices[j].x);
       sceneVertices.push_back(mesh.vertices[j].y);
@@ -173,31 +318,34 @@ public:
       sceneVertices.push_back(1.0f);
     }
 
-    for (int j = 0; j < mesh.faces.size(); j++) {
+    for (int j = 0; j < mesh.faces.size(); j++)
+    {
       sceneFaces.push_back(offset + mesh.faces[j].x);
       sceneFaces.push_back(offset + mesh.faces[j].y);
       sceneFaces.push_back(offset + mesh.faces[j].z);
     }
   }
-  void addToMovingScene(Sphere &sphere) {
-    movingMeshes.push_back(sphere);
-    this->addToScene(sphere);
-  }
-  void addToStaticScene(Mesh &mesh) {
+
+  void addToStaticScene(Mesh &mesh)
+  {
     staticMeshes.push_back(mesh);
     this->addToScene(mesh);
   }
-  void clearVerticiesAndFaces() {
+  void clearVerticiesAndFaces()
+  {
     sceneVertices.clear();
     sceneFaces.clear();
   }
-  void clearMovingMeshes() { movingMeshes.clear(); }
 
   unsigned int offset = 0;
-  template <typename T> void updateVerticiesAndFaces(vector<T> &meshes) {
+  template <typename T>
+  void updateVerticiesAndFaces(vector<T> &meshes)
+  {
 
-    for (int i = 0; i < meshes.size(); i++) {
-      for (int j = 0; j < meshes[i].vertices.size(); j++) {
+    for (int i = 0; i < meshes.size(); i++)
+    {
+      for (int j = 0; j < meshes[i].vertices.size(); j++)
+      {
         // x
         sceneVertices.push_back(meshes[i].vertices[j].x);
         // y
@@ -212,7 +360,8 @@ public:
         // b
         sceneVertices.push_back(1.0f);
       }
-      for (int j = 0; j < meshes[i].faces.size(); j++) {
+      for (int j = 0; j < meshes[i].faces.size(); j++)
+      {
         // f_v1
         sceneFaces.push_back(offset + meshes[i].faces[j].x);
         // f_v2
@@ -224,141 +373,28 @@ public:
       offset += meshes[i].vertices.size();
     }
   }
-  void updateScene() {
+  void updateScene()
+  {
     clearVerticiesAndFaces();
 
     offset = 0;
 
     this->updateVerticiesAndFaces(staticMeshes);
-    this->updateVerticiesAndFaces(movingMeshes);
 
     offset = 0;
-  }
-  static glm::vec3 closestPointOnTriangle(glm::vec3 a, glm::vec3 b, glm::vec3 c,
-                                          glm::vec3 p) {
-    glm::vec3 ab = b - a;
-    glm::vec3 ac = c - a;
-    glm::vec3 bc = c - b;
-
-    float snom = glm::dot(p - a, ab), sdenom = glm::dot(p - b, a - b);
-    float tnom = glm::dot(p - a, ac), tdenom = glm::dot(p - c, a - c);
-
-    if (snom <= 0.f && tnom <= 0.f)
-      return a;
-
-    float unom = glm::dot(p - b, bc), udenom = glm::dot(p - c, b - c);
-
-    if (sdenom <= 0.f && unom <= 0.f)
-      return b;
-    if (tdenom <= 0.f && udenom <= 0.f)
-      return c;
-
-    glm::vec3 n = glm::cross(b - a, c - a);
-    float vc = glm::dot(n, glm::cross(a - p, b - p));
-    if (vc <= 0.f && snom >= 0.f && sdenom >= 0.f)
-      return a + snom / (snom + sdenom) * ab;
-
-    float va = glm::dot(n, glm::cross(b - p, c - p));
-    if (va <= 0.f && unom >= 0.f && udenom >= 0.f)
-      return b + unom / (unom + udenom) * bc;
-
-    float vb = glm::dot(n, glm::cross(c - p, a - p));
-    if (vb <= 0.f && tnom >= 0.f && tdenom >= 0.f)
-      return a + tnom / (tnom + tdenom) * ac;
-
-    float u = va / (va + vb + vc);
-    float v = vb / (va + vb + vc);
-    float w = 1.f - u - v;
-    return u * a + v * b + w * c;
-  }
-
-  void animateScene(double deltaTime) {
-    float restitution = 0.4;
-    float gravity = 0.001f;
-
-    for (int i = 0; i < movingMeshes.size(); i++) {
-      movingMeshes[i].vel.y -= gravity * deltaTime * 60;
-      movingMeshes[i].moveMesh(movingMeshes[i].vel * (float)(deltaTime * 60));
-    }
-
-    for (int iter = 0; iter < 5; iter++) {
-
-      for (int i = 0; i < movingMeshes.size(); i++) {
-        for (int j = i + 1; j < movingMeshes.size(); j++) {
-          glm::vec3 diff = movingMeshes[i].center - movingMeshes[j].center;
-          float dist = glm::length(diff);
-          float rsum = movingMeshes[i].radius + movingMeshes[j].radius;
-
-          if (dist < rsum and dist > 0.0f) {
-            glm::vec3 n = diff / dist;
-
-            glm::vec3 v1 = movingMeshes[i].vel;
-            glm::vec3 v2 = movingMeshes[j].vel;
-            float m1 = movingMeshes[i].mass;
-            float m2 = movingMeshes[j].mass;
-
-            float vrel = glm::dot(v1 - v2, n);
-            if (vrel < 0) {
-              float impulse =
-                  -(1.0f + restitution) * vrel / (1.0f / m1 + 1.0f / m2);
-              movingMeshes[i].vel = v1 + (impulse / m1) * n;
-              movingMeshes[j].vel = v2 - (impulse / m2) * n;
-            }
-
-            float penetration = rsum - dist;
-            if (penetration > 0) {
-
-              glm::vec3 correction = (penetration / (m1 + m2)) * n;
-              movingMeshes[i].moveMesh(correction * m2);
-              movingMeshes[j].moveMesh(-correction * m1);
-            }
-          }
-        }
-      }
-
-      for (int i = 0; i < movingMeshes.size(); i++) {
-        for (int j = 0; j < staticMeshes.size(); j++) {
-          for (int k = 0; k < staticMeshes[j].faces.size(); k++) {
-            glm::ivec3 f = staticMeshes[j].faces[k];
-            glm::vec3 v1 = staticMeshes[j].vertices[f.x];
-            glm::vec3 v2 = staticMeshes[j].vertices[f.y];
-            glm::vec3 v3 = staticMeshes[j].vertices[f.z];
-
-            glm::vec3 p =
-                closestPointOnTriangle(v1, v2, v3, movingMeshes[i].center);
-            float dist = glm::length(movingMeshes[i].center - p);
-            float pen = dist - movingMeshes[i].radius;
-
-            if (pen < 0) {
-              glm::vec3 n = glm::normalize(movingMeshes[i].center - p);
-              glm::vec3 vel = movingMeshes[i].vel;
-
-              float vrel = glm::dot(vel, n);
-              if (vrel < 0) {
-                movingMeshes[i].vel = vel - (1.0f + restitution) * vrel * n;
-              }
-              movingMeshes[i].moveMesh(-pen * n);
-            }
-          }
-        }
-      }
-    }
-  }
-  void shotBall(float radius, float speed) {
-    float mass = 0.9 * (4.0f / 3.0f) * M_PI * radius * radius * radius;
-    Sphere sphere(speed * camera->front, camera->eye, radius, mass);
-    this->addToMovingScene(sphere);
   }
 };
 
 // loadaj shader
 unsigned int make_module(const std::string &filepath,
-                         unsigned int module_type) {
+                         unsigned int module_type)
+{
   std::ifstream file;
   std::stringstream bufferedLines;
   std::string line;
   file.open(filepath);
-  while (std::getline(file, line)) {
+  while (std::getline(file, line))
+  {
     bufferedLines << line << "\n";
   }
   std::string shaderSource = bufferedLines.str();
@@ -372,16 +408,19 @@ unsigned int make_module(const std::string &filepath,
 
   GLint success;
   glGetShaderiv(shaderModule, GL_COMPILE_STATUS, &success);
-  if (success != GL_TRUE) {
+  if (success != GL_TRUE)
+  {
     char errorLog[1024];
     glGetShaderInfoLog(shaderModule, 1024, NULL, errorLog);
-    std::cout << "Shader error:\n" << errorLog << std::endl;
+    std::cout << "Shader error:\n"
+              << errorLog << std::endl;
   }
   return shaderModule;
 }
 // compajliraj shader
 unsigned int make_shader(const std::string &vertex_filepath,
-                         const std::string &fragment_filepath) {
+                         const std::string &fragment_filepath)
+{
   std::vector<unsigned int> modules;
   modules.push_back(make_module(vertex_filepath, GL_VERTEX_SHADER));
   modules.push_back(make_module(fragment_filepath, GL_FRAGMENT_SHADER));
@@ -393,10 +432,12 @@ unsigned int make_shader(const std::string &vertex_filepath,
 
   GLint success;
   glGetProgramiv(shader, GL_LINK_STATUS, &success);
-  if (success != GL_TRUE) {
+  if (success != GL_TRUE)
+  {
     char errorLog[1024];
     glGetProgramInfoLog(shader, 1024, NULL, errorLog);
-    std::cout << "Link error:\n" << errorLog << std::endl;
+    std::cout << "Link error:\n"
+              << errorLog << std::endl;
   }
   for (unsigned int shaderModule : modules)
     glDeleteShader(shaderModule);
@@ -404,57 +445,37 @@ unsigned int make_shader(const std::string &vertex_filepath,
   return shader;
 }
 
-float scrollOffset = 0.1f;
-
-void scrollCallback(GLFWwindow *window, double xoffset, double yoffset) {
-  float scOf = scrollOffset + (float)yoffset * 0.01f;
-  if (scOf > 0.1f) {
-    scrollOffset = scOf;
-  }
-}
-
-int main() {
-  Mesh mesh;
-  mesh.loadMesh("../src/objects/kocka.obj");
-  mesh.scaleMesh(3);
-
-  Camera camera(glm::vec3(3.0f, 2.0f, 5.0f), glm::vec3(0.0f, 0.0f, 0.0f),
+int main()
+{
+  Camera camera(glm::vec3(50.0f, 50.0f, 50.0f), glm::vec3(0.0f, 0.0f, 0.0f),
                 glm::vec3(0.0f, 1.0f, 0.0f));
-  for (int i = 0; i < mesh.vertices.size(); i++) {
-    cout << mesh.vertices[i].x << " " << mesh.vertices[i].y << " "
-         << mesh.vertices[i].z << endl;
-  }
-  for (int i = 0; i < mesh.faces.size(); i++) {
-    cout << mesh.faces[i].x << " " << mesh.faces[i].y << " " << mesh.faces[i].z
-         << endl;
-  }
+
   Scene scene(&camera);
-  scene.addToStaticScene(mesh);
-  Mesh mesh2 = mesh;
-  mesh2.moveMesh(glm::vec3(5.0f, 0.0f, 0.0f));
-  scene.addToStaticScene(mesh2);
-  Mesh mesh3 = mesh;
-  mesh3.scaleMesh(2);
-  scene.addToStaticScene(mesh3);
-  Mesh mesh4;
-  mesh4.loadMesh("../src/objects/piramida.obj");
-  mesh4.scaleMesh(3);
-  mesh4.moveMesh(glm::vec3(0.0f, 0.0f, 5.0f));
-  scene.addToStaticScene(mesh4);
-  for (int i = 0; i < scene.sceneVertices.size(); i++) {
-    cout << scene.sceneVertices.data()[i] << endl;
-  }
-  for (int i = 0; i < scene.sceneFaces.size(); i++) {
-    cout << scene.sceneFaces.data()[i] << endl;
-  }
+  // 0
+  CoordiateSystem cor;
+  scene.addToStaticScene(cor);
+
+  // 1
+  SplineCurve spline;
+  spline.loadSplineCurve("../src/splines/spline_helix.txt");
+  scene.addToStaticScene(spline);
+  // 2
+  Line line(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(10.0f, 10.0f, 10.0f));
+  scene.addToStaticScene(line);
+  // 3
+  Mesh ship;
+  ship.loadMesh("../src/objects/Ncc.obj");
+  ship.scaleMesh(5.0f);
+  scene.addToStaticScene(ship);
 
   if (!glfwInit())
     return -1;
 
-  GLFWwindow *window = glfwCreateWindow(1920, 1080, "Cube", NULL, NULL);
+  GLFWwindow *window = glfwCreateWindow(1920, 1080, "Animation", NULL, NULL);
   glfwMakeContextCurrent(window);
 
-  if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+  if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+  {
     std::cout << "Couldn't load opengl" << std::endl;
     glfwTerminate();
     return -1;
@@ -475,67 +496,51 @@ int main() {
   glGenVertexArrays(1, &VAO);
   glGenBuffers(1, &VBO);
   glGenBuffers(1, &EBO);
-
-  while (!glfwWindowShouldClose(window)) {
+  int frameCount = 0;
+  while (!glfwWindowShouldClose(window))
+  {
     static double lastTime = glfwGetTime();
     double now = glfwGetTime();
     double deltaTime = now - lastTime;
-    moveSpeed = 0.02;
-    if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) {
+    moveSpeed = 0.08;
+
+    if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
+    {
       moveSpeed = 0.06;
     }
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+    {
       camera.moveCameraInDirection(moveSpeed, 0, 0, deltaTime);
     }
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+    {
       camera.moveCameraInDirection(-moveSpeed, 0, 0, deltaTime);
     }
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+    {
       camera.moveCameraInDirection(0, -moveSpeed, 0, deltaTime);
     }
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+    {
       camera.moveCameraInDirection(0, moveSpeed, 0, deltaTime);
     }
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+    {
       camera.moveCameraInDirection(0, 0, moveSpeed, deltaTime);
     }
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+    {
       camera.moveCameraInDirection(0, 0, -moveSpeed, deltaTime);
     }
 
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    {
       glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
-    if ((glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)) {
+    if ((glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS))
+    {
       glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
-      scene.clearMovingMeshes();
-    }
-    glfwSetScrollCallback(window, scrollCallback);
-
-    static double lastPause = 0;
-    double nowPause = glfwGetTime();
-    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS and
-        nowPause - lastPause > 0.15) {
-      pause = !pause;
-      lastPause = nowPause;
-    }
-
-    static double lastShot = 0;
-    double nowShot = glfwGetTime();
-    if (nowShot - lastShot > 0.15) {
-      if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
-        scene.shotBall(scrollOffset, 0.2);
-        lastShot = nowShot;
-      } else if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) ==
-                 GLFW_PRESS) {
-        scene.shotBall(scrollOffset, 0.07);
-        lastShot = nowShot;
-      }
-    }
-
-    double time = glfwGetTime();
 
     double xpos, ypos;
     glfwGetCursorPos(window, &xpos, &ypos);
@@ -545,7 +550,8 @@ int main() {
     xPrev = xpos;
     yPrev = ypos;
 
-    if (dx != 0 or dy != 0) {
+    if (dx != 0 or dy != 0)
+    {
       camera.rotate(sensitivity * dx, -sensitivity * dy);
     }
     glm::mat4 view = glm::lookAt(camera.eye, camera.looking_at, camera.up);
@@ -580,17 +586,39 @@ int main() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glUseProgram(shader);
 
-    for (int i = 0; i < scene.movingMeshes.size(); i++) {
-      cout << i << ", v=" << glm::length(scene.movingMeshes[i].vel) << endl;
-    }
     lastTime = now;
 
-    if (pause == false) {
-      scene.animateScene(deltaTime);
+    if (pause == false)
+    {
+
+      glm::vec3 orient = 1 / 3.0f * spline.goalOrientations[frameCount % spline.goalOrientations.size()];
+      glm::vec3 pos = spline.linePoints[frameCount % spline.linePoints.size()];
+      scene.staticMeshes[2].vertices[1] = orient + pos;
+      scene.staticMeshes[2].vertices[0] = -orient + pos;
+
+      glm::vec3 initialOrientation = glm::vec3(1.0f, 0.0f, 0.0f);
+      glm::vec3 dir = glm::normalize(orient);
+
+      float d = glm::dot(initialOrientation, dir);
+      float angle = glm::acos(d);
+      glm::vec3 axis = glm::cross(initialOrientation, dir);
+
+      scene.staticMeshes[3].orientMesh(angle, glm::normalize(axis), pos);
+
+      //transformirane koordinate sustava
+      glm::vec3 localPoint = glm::vec3(0.0f, 0.0f, 10.0f);
+      
+
+
+      frameCount++;
+
+
+      
     }
     scene.updateScene();
 
     glBindVertexArray(VAO);
+
     glDrawElements(GL_TRIANGLES, scene.sceneFaces.size(), GL_UNSIGNED_INT, 0);
 
     glfwSwapBuffers(window);
