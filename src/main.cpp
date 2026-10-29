@@ -146,6 +146,7 @@ public:
   vector<glm::vec3> goalOrientations;
   vector<glm::vec3> rotationAxes;
   vector<float> rotationAngles;
+  vector<glm::vec3> secondDer;
   SplineCurve()
   {
     controlPoints = vector<glm::vec3>();
@@ -199,6 +200,12 @@ public:
                                         -1.0f, 0.0f, 1.0f, 0.0f);
         glm::vec3 tangent = t_tangent * (1.0f / 2.0f) * glm::transpose(mat_d) * glm::transpose(r);
         goalOrientations.push_back(tangent);
+
+        glm::vec2 t_sec_d = glm::vec2(2 * t, 1.0f);
+        glm::mat2x4 mat_sec_d = glm::mat2x4(-1.0f, 3.0f, -3.0f, 1.0f,
+                                            2.0f, -4.0f, 2.0f, 0.0f);
+        glm::vec3 p_sec_d = t_sec_d * (1.0f / 2.0f) * glm::transpose(mat_sec_d) * glm::transpose(r);
+        secondDer.push_back(p_sec_d);
       }
     }
 
@@ -457,7 +464,7 @@ int main()
 
   // 1
   SplineCurve spline;
-  spline.loadSplineCurve("../src/splines/spline_helix.txt");
+  spline.loadSplineCurve("../src/splines/spline1.txt");
   scene.addToStaticScene(spline);
   // 2
   Line line(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(10.0f, 10.0f, 10.0f));
@@ -590,8 +597,8 @@ int main()
 
     if (pause == false)
     {
-
-      glm::vec3 orient = 1 / 3.0f * spline.goalOrientations[frameCount % spline.goalOrientations.size()];
+      glm::vec3 w = spline.goalOrientations[frameCount % spline.goalOrientations.size()];
+      glm::vec3 orient = 1 / 3.0f * w;
       glm::vec3 pos = spline.linePoints[frameCount % spline.linePoints.size()];
       scene.staticMeshes[2].vertices[1] = orient + pos;
       scene.staticMeshes[2].vertices[0] = -orient + pos;
@@ -605,20 +612,22 @@ int main()
 
       scene.staticMeshes[3].orientMesh(angle, glm::normalize(axis), pos);
 
-      //transformirane koordinate sustava
-      glm::vec3 localPoint = glm::vec3(0.0f, 0.0f, 10.0f);
-      
+      // transformirane koordinate sustava
+      glm::vec3 localPoint = glm::vec3(1.0f, 1.0f, 2.0f);
 
+      glm::vec3 u = glm::cross(w, spline.secondDer[frameCount % spline.secondDer.size()]);
+      glm::vec3 v = glm::cross(w, u);
+      glm::mat3x3 R = glm::mat3x3(glm::normalize(u), glm::normalize(v), glm::normalize(w));
 
+      glm::vec3 globalPoint = R * localPoint+pos;
+      printf("Local point: %f, %f, %f", localPoint.x, localPoint.y, localPoint.z);
+      printf(" Global point: %f, %f, %f\n", globalPoint.x, globalPoint.y, globalPoint.z);
       frameCount++;
-
-
-      
     }
     scene.updateScene();
-
+    
     glBindVertexArray(VAO);
-
+    
     glDrawElements(GL_TRIANGLES, scene.sceneFaces.size(), GL_UNSIGNED_INT, 0);
 
     glfwSwapBuffers(window);
